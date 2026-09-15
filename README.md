@@ -67,14 +67,26 @@ python3 -m venv .venv
 可用 toy training 检查优化器、递归反向传播和 LoRA-only checkpoint 的完整闭环：
 
 ```bash
-.venv/bin/python toy_train.py --num-loops 4 --steps 100
+.venv/bin/python toy_train.py --mode ordinary --num-loops 1 --steps 100
+.venv/bin/python toy_train.py --mode recursive --num-loops 4 --steps 100
 ```
 
 该 loss 是合成的回归目标，不是 Scale-RAE flow-matching loss，只能作为工程
 sanity check。
 
-2026-09-15 本机 CPU 环境已验证 5/5 项单元测试通过。该环境位于本目录
+2026-09-15 本机 CPU 环境已验证 12/12 项单元测试通过。该环境位于本目录
 的 `.venv` 中，仅用于轻量开发测试，不用于加载正式图像生成权重。
+八项开发任务的验收状态见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
+
+普通 LoRA (`K=1`) 和 Recursive LoRA (`K=4`) 的独立 toy 训练路径均已跑通：
+
+| path | initial loss | final loss | final / initial |
+|---|---:|---:|---:|
+| ordinary LoRA, K=1 | 0.3624 | 0.1429 | 0.3942 |
+| Recursive LoRA, K=4 | 0.3849 | 0.1618 | 0.4204 |
+
+两者的目标只是确认独立 forward/训练/checkpoint 路径工作；不可用这两个
+合成 loss 数字比较方法优劣。
 
 ## Scale-RAE 真实插入点审计
 
