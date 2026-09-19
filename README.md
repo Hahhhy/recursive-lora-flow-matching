@@ -107,6 +107,18 @@ python development/recursive_lora/audit_loaded_scale_rae.py \
 第一个建议烟测候选是仅注入 blocks 12--27 的 `attn.proj`，因为它是单一、
 易归因的残差输出路径。这是工程起点，不是已证明的最佳位置。
 
+第一轮对照还包含 AdaLN Linear，以及 layerwise/rangewise 两种不同循环语义，
+详见 [`EXPERIMENT_V0.md`](EXPERIMENT_V0.md)。真实权重的单批反向传播入口是
+`scale_rae_single_batch.py`；它只验证原生 flow-matching loss、梯度和显存，
+不产生可用于论文比较的质量结论。
+
+## 正式 baseline 批处理
+
+`prepare_full_baseline.sh` 一次生成 B0/B1/B2/B3 × GenEval/DPG-Bench 的八份
+冻结 plan（共 6,472 张图）。`run_scale_rae_plan.py` 加载一次模型和 decoder，
+运行一份 plan 的任意分片，逐图原子保存 PNG 与 JSONL provenance，并支持按
+已完成 record 断点续跑。实际集群提交层只需为八份 plan 分配 shard/GPU。
+
 官方 Stage 1/2 脚本给出 2.4B DiT 的配置为 hidden size 2048、32 层、32 heads，
 DDT encoder depth 2。因此，rank 8 时仅给 blocks 12--27 的 16 个 `attn.proj`
 注入 LoRA，理论新增参数为

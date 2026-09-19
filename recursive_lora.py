@@ -25,8 +25,9 @@ class LoRALinear(nn.Module):
         self.rank = int(rank)
         self.alpha = float(alpha)
         self.scaling = self.alpha / self.rank
-        self.lora_a = nn.Parameter(torch.empty(self.rank, base.in_features))
-        self.lora_b = nn.Parameter(torch.zeros(base.out_features, self.rank))
+        factory_kwargs = {"device": base.weight.device, "dtype": base.weight.dtype}
+        self.lora_a = nn.Parameter(torch.empty(self.rank, base.in_features, **factory_kwargs))
+        self.lora_b = nn.Parameter(torch.zeros(base.out_features, self.rank, **factory_kwargs))
         nn.init.kaiming_uniform_(self.lora_a, a=5**0.5)
 
         for parameter in self.base.parameters():
