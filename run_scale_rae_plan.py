@@ -52,6 +52,11 @@ def counter_delta(before: dict, after: dict) -> dict:
     return result
 
 
+def format_scale_rae_generation_prompt(prompt: str) -> str:
+    """Match the official Scale-RAE benchmark generation instruction."""
+    return "Generate an image of " + prompt
+
+
 def main() -> None:
     args = parse_args()
     if not torch.cuda.is_available():
@@ -117,14 +122,15 @@ def main() -> None:
 
         scale_cli.set_seed(int(row["seed"]))
         reset_scale_rae_sampler_step_hook(model)
-        prompt = scale_cli.build_prompt(row["prompt"], model_config=model.config, with_image=False)
+        generation_prompt = format_scale_rae_generation_prompt(row["prompt"])
+        prompt = scale_cli.build_prompt(generation_prompt, model_config=model.config, with_image=False)
         input_ids = scale_cli.tokenize_prompt(prompt, tokenizer, device=model.device)
         before = stats.to_record()
         torch.cuda.reset_peak_memory_stats()
         torch.cuda.synchronize()
         started = time.perf_counter()
         with torch.inference_mode():
-            _, image_embeds = model.generate(
+            output_ids, image_embeds = model.generate(
                 input_ids,
                 images=None,
                 **scale_cli._common_gen_kwargs(
@@ -139,7 +145,11 @@ def main() -> None:
         torch.cuda.synchronize()
         seconds = time.perf_counter() - started
         if len(images) != 1:
-            raise RuntimeError(f"expected one decoded image, received {len(images)}")
+            output_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+            raise RuntimeError(
+                f"expected one decoded image, received {len(images)}; "
+                f"generation_prompt={generation_prompt!r}; output_text={output_text!r}"
+            )
         output.parent.mkdir(parents=True, exist_ok=True)
         temporary = output.with_suffix(output.suffix + ".tmp")
         images[0].save(temporary, format="PNG")
@@ -152,6 +162,7 @@ def main() -> None:
                 "output_image": str(output.resolve()),
                 "model_path": args.model_path,
                 "decoder_repo": args.decoder_repo,
+                "generation_prompt": generation_prompt,
                 "dtype": args.dtype,
                 "shard_index": args.shard_index,
                 "num_shards": args.num_shards,
