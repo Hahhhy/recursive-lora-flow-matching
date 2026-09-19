@@ -21,4 +21,7 @@ The items below are engineering gates. Passing them does not establish an image-
 - `attn.proj` remains the first auditable target, not a proven optimal insertion point.
 - The next gate requires a loaded official Scale-RAE checkpoint on the GPU cluster.
 - The immediate GPU gate is a one-batch native flow-matching backward pass, not a full run.
+- After the one-batch gate, `scale_rae_overfit.py` checks a 50-step stable
+  checkpoint-shaped objective and LoRA-only checkpoint round trip.  It remains
+  synthetic and must not be reported as a quality experiment.
 - The controlled first-round matrix is specified in `EXPERIMENT_V0.md`.
