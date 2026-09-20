@@ -116,8 +116,14 @@ python development/recursive_lora/audit_loaded_scale_rae.py \
 固定、checkpoint-shaped 的合成 `(z, x)` 批次，并在每一步重置 diffusion RNG，
 用于验证稳定目标上的 loss 下降、梯度裁剪、逐步 JSONL 日志以及 LoRA-only
 checkpoint 的保存/恢复。该入口仍是优化闭环 Gate，不是数据训练，不能用其 loss
-声称生成质量提高；真实训练必须从官方多模态数据管线取得语言 hidden state `z`
-和 SigLIP2 answer-image feature `x`。
+声称生成质量提高。
+
+`scale_rae_real_train.py` 是 CUDA 上的真实图文 query-mode 训练入口。官方
+query-mode 数据通路被 `IS_XLA_AVAILABLE` 保护，因此该入口等价地组装
+冻结 Qwen 的 latent-query 条件与冻结 SigLIP2 的真实图像特征，然后复用
+原生 `diff_head.training_loss`。输入 JSONL 每行必须包含 `image` 和
+`caption` 字符串。`prepare_coco_pairs.py` 可将 COCO captions annotation
+确定性地转换为该格式。
 
 ## 正式 baseline 批处理
 
