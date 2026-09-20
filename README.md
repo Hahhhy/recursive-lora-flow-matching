@@ -125,6 +125,10 @@ query-mode 数据通路被 `IS_XLA_AVAILABLE` 保护，因此该入口等价地�
 `caption` 字符串。`prepare_coco_pairs.py` 可将 COCO captions annotation
 确定性地转换为该格式。
 
+`run_scale_rae_plan.py --lora-checkpoint ...` 会先按 checkpoint 中的精确路径
+重建 LoRA，再安装原有 loop 推理补丁。每条生成 record 保存 checkpoint
+的 SHA-256、LoRA 配置和训练 metadata，用于 `K_train × K_infer` 评测追溯。
+
 ## 正式 baseline 批处理
 
 `prepare_full_baseline.sh` 一次生成 B0/B1/B2/B3 × GenEval/DPG-Bench 的八份

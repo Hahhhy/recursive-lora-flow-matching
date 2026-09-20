@@ -8,6 +8,7 @@ same script handles B0/Dense/Sparse/Loop-Guidance from the resolved plan.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -29,6 +30,7 @@ def parse_args():
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--num-shards", type=int, default=1)
     parser.add_argument("--max-samples", type=int)
+    parser.add_argument("--lora-checkpoint", type=Path)
     return parser.parse_args()
 
 
@@ -55,6 +57,40 @@ def counter_delta(before: dict, after: dict) -> dict:
 def format_scale_rae_generation_prompt(prompt: str) -> str:
     """Match the official Scale-RAE benchmark generation instruction."""
     return "Generate an image of " + prompt
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def install_lora_checkpoint(model, checkpoint: Path) -> dict:
+    from recursive_lora import LoRAConfig, apply_lora_config, load_lora_checkpoint
+    from target_audit import resolve_scale_rae_dit
+
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    raw = payload.get("lora_config", {})
+    config = LoRAConfig(
+        tuple(raw.get("target_paths", ())),
+        rank=int(raw.get("rank", 0)),
+        alpha=float(raw.get("alpha", 0.0)),
+    )
+    _, dit = resolve_scale_rae_dit(model)
+    apply_lora_config(dit, config)
+    metadata = load_lora_checkpoint(checkpoint, model, config)
+    return {
+        "path": str(checkpoint.resolve()),
+        "sha256": file_sha256(checkpoint),
+        "config": {
+            "target_paths": list(config.target_paths),
+            "rank": config.rank,
+            "alpha": config.alpha,
+        },
+        "training_metadata": metadata,
+    }
 
 
 def main() -> None:
@@ -100,6 +136,9 @@ def main() -> None:
     loop_config = LoopConfig.from_dict(resolved["loop"])
     dtype = getattr(torch, args.dtype)
     tokenizer, model, _, _ = scale_cli.load_scale_rae_model(args.model_path, device="cuda", dtype=dtype)
+    lora_provenance = None
+    if args.lora_checkpoint is not None:
+        lora_provenance = install_lora_checkpoint(model, args.lora_checkpoint.resolve())
     model.eval()
     start_id, end_id, eos_id = scale_cli.prepare_special_token_ids(tokenizer)
     decoder = scale_cli.build_decoder(model, model_path=args.model_path, decoder_repo_id=args.decoder_repo)
@@ -171,6 +210,7 @@ def main() -> None:
                 "loop_stats_delta": counter_delta(before, after),
                 "step_protocol": step_protocol,
                 "cfg_protocol": cfg_protocol,
+                "lora_checkpoint": lora_provenance,
             },
         )
         print(json.dumps({"completed": row["prompt_id"], "output": str(output), "seconds": seconds}), flush=True)
