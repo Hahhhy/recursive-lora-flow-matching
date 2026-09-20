@@ -61,14 +61,22 @@ def load_rows(path: Path) -> list[dict]:
     return rows
 
 
+def module_device_dtype(module) -> tuple[torch.device, torch.dtype]:
+    parameter = next(module.parameters())
+    return parameter.device, parameter.dtype
+
+
 @torch.no_grad()
 def encode_pair(model, tokenizer, image_processor, build_prompt, row: dict, image_root: Path, dtype):
-    device = model.device
     image_path = Path(row["image"])
     if not image_path.is_absolute():
         image_path = image_root / image_path
     image = Image.open(image_path).convert("RGB")
-    pixels = image_processor[0].preprocess(image, return_tensors="pt")["pixel_values"].to(device, dtype=dtype)
+    vision_tower = model.get_vision_tower_aux_list()[0]
+    vision_device, vision_dtype = module_device_dtype(vision_tower)
+    pixels = image_processor[0].preprocess(image, return_tensors="pt")["pixel_values"].to(
+        device=vision_device, dtype=vision_dtype
+    )
 
     # Clean RAE target before the multimodal projector, matching prediction_target
     # in the official query-mode branch.
@@ -79,22 +87,37 @@ def encode_pair(model, tokenizer, image_processor, build_prompt, row: dict, imag
 
     text = "Generate an image of " + row["caption"].strip()
     prompt = build_prompt(text, model_config=model.config, with_image=False)
-    ids = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).input_ids.to(device)
+    language_model = model.get_model()
+    language_device, language_dtype = module_device_dtype(language_model.embed_tokens)
+    ids = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).input_ids.to(language_device)
     start_id = tokenizer.convert_tokens_to_ids("<im_start>")
     if start_id is None or start_id < 0 or start_id == tokenizer.unk_token_id:
         raise RuntimeError("checkpoint tokenizer has no <im_start> token")
-    start = torch.tensor([[start_id]], device=device, dtype=ids.dtype)
-    text_embeds = model.get_model().embed_tokens(torch.cat((ids, start), dim=1))
-    queries = model.get_model().latent_queries
+    start = torch.tensor([[start_id]], device=language_device, dtype=ids.dtype)
+    text_embeds = language_model.embed_tokens(torch.cat((ids, start), dim=1))
+    queries = language_model.latent_queries
     if queries is None or queries.shape[0] != expected_tokens:
         raise RuntimeError(f"unexpected latent_queries shape {None if queries is None else tuple(queries.shape)}")
-    inputs_embeds = torch.cat((text_embeds, queries.unsqueeze(0).to(text_embeds.dtype)), dim=1)
-    outputs = model.get_model()(inputs_embeds=inputs_embeds, use_cache=False, return_dict=True)
+    inputs_embeds = torch.cat(
+        (text_embeds, queries.unsqueeze(0).to(device=language_device, dtype=language_dtype)), dim=1
+    )
+    outputs = language_model(inputs_embeds=inputs_embeds, use_cache=False, return_dict=True)
     query_states = outputs.last_hidden_state[:, -expected_tokens:, :]
-    z = model.diff_head_projector(query_states) if model.use_diff_head_projector else query_states
+    if model.use_diff_head_projector:
+        projector_device, projector_dtype = module_device_dtype(model.diff_head_projector)
+        query_states = query_states.to(device=projector_device, dtype=projector_dtype)
+        z = model.diff_head_projector(query_states)
+    else:
+        z = query_states
     if z.shape[-1] != model.diff_head.z_channels:
         raise RuntimeError(f"unexpected condition shape {tuple(z.shape)}")
-    return z.detach(), x.to(dtype=z.dtype).detach(), str(image_path), text
+    head_device, head_dtype = module_device_dtype(model.diff_head)
+    return (
+        z.to(device=head_device, dtype=head_dtype).detach(),
+        x.to(device=head_device, dtype=head_dtype).detach(),
+        str(image_path),
+        text,
+    )
 
 
 def main() -> None:
